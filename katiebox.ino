@@ -24,6 +24,7 @@ MFRC522 rfid(PIN_RFID_SS, PIN_RFID_RST);
 
 static bool isPlaying = false;
 static String lastUid = "";
+static int startingVolume = 10;
 static uint32_t lastScanMs = 0;
 static constexpr uint32_t SCAN_DEBOUNCE_MS = 800;
 
@@ -87,7 +88,8 @@ void setup() {
   Serial.println("✅ RFID initialized");
 
   audio.setPinout(PIN_I2S_BCLK, PIN_I2S_LRCK, PIN_I2S_DOUT);
-  audio.setVolume(21);
+  audio.setVolume(startingVolume);
+  Audio::audio_info_callback = onAudioEvent;
 
   Serial.println("Scan a tag to play /<UID>.mp3 from SD root");
 }
@@ -109,21 +111,19 @@ void loop() {
   Serial.print("Scanned UID: ");
   Serial.println(uidHex);
 
-  // If you want "scan same tag toggles stop", uncomment this block:
-  // if (uidHex == lastUid && isPlaying) {
-  //   stopPlayback();
-  //   lastUid = "";
-  // } else {
-  //   stopPlayback();
-  //   playForUid(uidHex);
-  //   lastUid = uidHex;
-  // }
-
-  // Default behavior: always stop current and play the scanned UID
-  stopPlayback();
-  playForUid(uidHex);
-  lastUid = uidHex;
+  if (!(uidHex == lastUid && isPlaying)) {
+    stopPlayback();
+    playForUid(uidHex);
+    lastUid = uidHex;
+  }
 
   rfid.PICC_HaltA();
   rfid.PCD_StopCrypto1();
+}
+
+static void onAudioEvent(Audio::msg_t m) {
+  if (m.e == Audio::evt_eof) {
+    Serial.println("MP3 playback ended");
+    isPlaying = false;
+  }
 }
