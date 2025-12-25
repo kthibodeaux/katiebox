@@ -21,7 +21,7 @@ static constexpr int PIN_SPI_MISO = 13;
 // SD + RFID
 static constexpr int PIN_SD_CS    = 10;
 static constexpr int PIN_RFID_SS  = 15;
-static constexpr int PIN_RFID_RST = 0;
+static constexpr int PIN_RFID_RST = 8;
 
 // I2S (MAX98357)
 static constexpr int PIN_I2S_BCLK = 4;
