@@ -1,8 +1,17 @@
 #include <Arduino.h>
+#include <EasyButton.h>
 #include <SPI.h>
 #include <SD.h>
 #include <MFRC522.h>
 #include "Audio.h"
+
+// Button pins
+static constexpr int PIN_BUTTON_VOL_DOWN  = 16;
+static constexpr int PIN_BUTTON_VOL_UP    = 17;
+static constexpr int PIN_BUTTON_NEXT_SONG = 18;
+EasyButton buttonVolDown(PIN_BUTTON_VOL_DOWN);
+EasyButton buttonVolUp(PIN_BUTTON_VOL_UP);
+EasyButton buttonNextSong(PIN_BUTTON_NEXT_SONG);
 
 // SPI pins
 static constexpr int PIN_SPI_SCK  = 12;
@@ -24,7 +33,7 @@ MFRC522 rfid(PIN_RFID_SS, PIN_RFID_RST);
 
 static bool isPlaying = false;
 static String lastUid = "";
-static int startingVolume = 10;
+static int volumeLevel = 10;
 static uint32_t lastScanMs = 0;
 static constexpr uint32_t SCAN_DEBOUNCE_MS = 800;
 
@@ -50,6 +59,24 @@ static String uidToHexUpper(const MFRC522::Uid &uid) {
     s += buf;
   }
   return s;
+}
+
+static void increaseVolume() {
+  if (volumeLevel < 21) {
+    volumeLevel++;
+    audio.setVolume(volumeLevel);
+    Serial.print("Volume: ");
+    Serial.println(volumeLevel);
+  }
+}
+
+static void decreaseVolume() {
+  if (volumeLevel > 1) {
+    volumeLevel--;
+    audio.setVolume(volumeLevel);
+    Serial.print("Volume: ");
+    Serial.println(volumeLevel);
+  }
 }
 
 static bool endsWithMp3(const String &name) {
@@ -177,6 +204,22 @@ static void stopPlayback() {
   isPlaying = false;
 }
 
+static void playNextTrack() {
+  trackEnded = false;
+  isPlaying = false;
+
+  playlistIndex++;
+  if (playlistIndex >= playlistCount) {
+    Serial.println("✅ Folder finished (end of playlist)");
+    Serial.println("Restarting playlist...");
+    playlistIndex = 0;
+    playCurrentTrack();
+  } else {
+    Serial.println("Next track...");
+    playCurrentTrack();
+  }
+}
+
 static void playCurrentTrack() {
   if (playlistCount == 0) return;
   if (playlistIndex < 0 || playlistIndex >= playlistCount) return;
@@ -228,6 +271,16 @@ void setup() {
   Serial.begin(115200);
   delay(500);
 
+  pinMode(PIN_BUTTON_VOL_DOWN, INPUT);
+  buttonVolDown.begin();
+  buttonVolDown.onPressed(decreaseVolume);
+  pinMode(PIN_BUTTON_VOL_UP, INPUT);
+  buttonVolUp.begin();
+  buttonVolUp.onPressed(increaseVolume);
+  pinMode(PIN_BUTTON_NEXT_SONG, INPUT);
+  buttonNextSong.begin();
+  buttonNextSong.onPressed(playNextTrack);
+
   Serial.println("\n--- RFID -> Folder Playlist Player ---");
 
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
@@ -250,7 +303,7 @@ void setup() {
   Serial.println("✅ RFID initialized");
 
   audio.setPinout(PIN_I2S_BCLK, PIN_I2S_LRCK, PIN_I2S_DOUT);
-  audio.setVolume(startingVolume);
+  audio.setVolume(volumeLevel);
 
   Audio::audio_info_callback = onAudioEvent;
 
@@ -258,22 +311,17 @@ void setup() {
 }
 
 void loop() {
+  // Check for input
+  buttonVolDown.read();
+  buttonVolUp.read();
+  buttonNextSong.read();
+
   // Keep audio flowing
   audio.loop();
 
   // Advance playlist on EOF (handled here, not inside callback)
   if (trackEnded) {
-    trackEnded = false;
-    isPlaying = false;
-
-    playlistIndex++;
-    if (playlistIndex >= playlistCount) {
-      Serial.println("✅ Folder finished (end of playlist)");
-      // stop at end; if you want loop, set playlistIndex = 0 and playCurrentTrack()
-    } else {
-      Serial.println("Next track...");
-      playCurrentTrack();
-    }
+    playNextTrack();
   }
 
   const uint32_t now = millis();
