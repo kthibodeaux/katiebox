@@ -28,6 +28,19 @@ static int startingVolume = 10;
 static uint32_t lastScanMs = 0;
 static constexpr uint32_t SCAN_DEBOUNCE_MS = 800;
 
+// ---------- Playlist state ----------
+static constexpr int MAX_TRACKS = 32;
+static String playlist[MAX_TRACKS];
+static int playlistCount = 0;
+static int playlistIndex = 0;
+static String currentFolder = "";
+
+// Set by EOF event, handled in loop()
+static volatile bool trackEnded = false;
+
+// Forward declare
+static void onAudioEvent(Audio::msg_t m);
+
 static String uidToHexUpper(const MFRC522::Uid &uid) {
   String s;
   s.reserve(uid.size * 2);
@@ -39,6 +52,124 @@ static String uidToHexUpper(const MFRC522::Uid &uid) {
   return s;
 }
 
+static bool endsWithMp3(const String &name) {
+  if (name.length() < 4) return false;
+  String lower = name;
+  lower.toLowerCase();
+  return lower.endsWith(".mp3");
+}
+
+static void sortPlaylist() {
+  // Simple bubble sort (small N)
+  for (int i = 0; i < playlistCount - 1; i++) {
+    for (int j = 0; j < playlistCount - i - 1; j++) {
+      if (playlist[j] > playlist[j + 1]) {
+        String tmp = playlist[j];
+        playlist[j] = playlist[j + 1];
+        playlist[j + 1] = tmp;
+      }
+    }
+  }
+}
+
+static String findFolderForUid(const String &uidHex) {
+  const String prefix = uidHex + "-";
+
+  File root = SD.open("/");
+  if (!root) {
+    Serial.println("❌ Failed to open root directory");
+    return "";
+  }
+
+  File entry = root.openNextFile();
+  while (entry) {
+    if (entry.isDirectory()) {
+      String name = entry.name(); // should be like "04A1C29F-desc"
+      if (name.startsWith(prefix)) {
+        entry.close();
+        root.close();
+        return "/" + name; // return full path
+      }
+    }
+    entry.close();
+    entry = root.openNextFile();
+  }
+
+  root.close();
+  return "";
+}
+
+static void clearPlaylist() {
+  for (int i = 0; i < playlistCount; i++) {
+    playlist[i] = "";
+  }
+  playlistCount = 0;
+  playlistIndex = 0;
+  currentFolder = "";
+}
+
+static bool buildPlaylistForFolder(const String &folderPath) {
+  clearPlaylist();
+  currentFolder = folderPath;
+
+  File dir = SD.open(folderPath.c_str());
+  if (!dir) {
+    Serial.print("❌ Failed to open folder: ");
+    Serial.println(folderPath);
+    return false;
+  }
+  if (!dir.isDirectory()) {
+    Serial.print("❌ Not a directory: ");
+    Serial.println(folderPath);
+    dir.close();
+    return false;
+  }
+
+  File entry = dir.openNextFile();
+  while (entry) {
+    if (!entry.isDirectory()) {
+      String name = entry.name(); // may include path depending on FS impl; handle both
+      // Normalize to just filename if it includes folder prefix
+      if (name.startsWith(folderPath)) {
+        // sometimes name is like "/04A1...-x/file.mp3"
+        int slash = name.lastIndexOf('/');
+        if (slash >= 0) name = name.substring(slash + 1);
+      }
+
+      if (endsWithMp3(name)) {
+        if (playlistCount < MAX_TRACKS) {
+          playlist[playlistCount++] = name;
+        } else {
+          Serial.println("⚠️ Playlist full; ignoring extra files");
+          break;
+        }
+      }
+    }
+    entry.close();
+    entry = dir.openNextFile();
+  }
+
+  dir.close();
+
+  if (playlistCount == 0) {
+    Serial.print("❌ No .mp3 files found in ");
+    Serial.println(folderPath);
+    return false;
+  }
+
+  sortPlaylist();
+
+  Serial.print("✅ Playlist built (");
+  Serial.print(playlistCount);
+  Serial.println(" tracks):");
+  for (int i = 0; i < playlistCount; i++) {
+    Serial.print("  ");
+    Serial.println(playlist[i]);
+  }
+
+  return true;
+}
+
 static void stopPlayback() {
   if (!isPlaying) return;
   Serial.println("Stopping playback...");
@@ -46,12 +177,16 @@ static void stopPlayback() {
   isPlaying = false;
 }
 
-static void playForUid(const String &uidHex) {
-  const String path = "/" + uidHex + ".mp3";
+static void playCurrentTrack() {
+  if (playlistCount == 0) return;
+  if (playlistIndex < 0 || playlistIndex >= playlistCount) return;
+
+  const String path = currentFolder + "/" + playlist[playlistIndex];
 
   if (!SD.exists(path.c_str())) {
-    Serial.print("❌ File not found: ");
+    Serial.print("❌ Missing file: ");
     Serial.println(path);
+    isPlaying = false;
     return;
   }
 
@@ -62,11 +197,38 @@ static void playForUid(const String &uidHex) {
   isPlaying = true;
 }
 
+static void startFolderPlaybackForUid(const String &uidHex) {
+  const String folder = findFolderForUid(uidHex);
+  if (folder == "") {
+    Serial.print("❌ No folder found for UID prefix: ");
+    Serial.println(uidHex + "-");
+    return;
+  }
+
+  Serial.print("Found folder: ");
+  Serial.println(folder);
+
+  if (!buildPlaylistForFolder(folder)) {
+    return;
+  }
+
+  playlistIndex = 0;
+  trackEnded = false;
+  playCurrentTrack();
+}
+
+static void onAudioEvent(Audio::msg_t m) {
+  if (m.e == Audio::evt_eof) {
+    // Don't touch SD / Audio here—just signal loop()
+    trackEnded = true;
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   delay(500);
 
-  Serial.println("\n--- RFID -> MP3 Player ---");
+  Serial.println("\n--- RFID -> Folder Playlist Player ---");
 
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
 
@@ -89,14 +251,30 @@ void setup() {
 
   audio.setPinout(PIN_I2S_BCLK, PIN_I2S_LRCK, PIN_I2S_DOUT);
   audio.setVolume(startingVolume);
+
   Audio::audio_info_callback = onAudioEvent;
 
-  Serial.println("Scan a tag to play /<UID>.mp3 from SD root");
+  Serial.println("Scan a tag to play files from /<UID>-description/ in order");
 }
 
 void loop() {
   // Keep audio flowing
   audio.loop();
+
+  // Advance playlist on EOF (handled here, not inside callback)
+  if (trackEnded) {
+    trackEnded = false;
+    isPlaying = false;
+
+    playlistIndex++;
+    if (playlistIndex >= playlistCount) {
+      Serial.println("✅ Folder finished (end of playlist)");
+      // stop at end; if you want loop, set playlistIndex = 0 and playCurrentTrack()
+    } else {
+      Serial.println("Next track...");
+      playCurrentTrack();
+    }
+  }
 
   const uint32_t now = millis();
   if (now - lastScanMs < SCAN_DEBOUNCE_MS) return;
@@ -111,19 +289,14 @@ void loop() {
   Serial.print("Scanned UID: ");
   Serial.println(uidHex);
 
+  // Ignore same tag while currently playing
   if (!(uidHex == lastUid && isPlaying)) {
     stopPlayback();
-    playForUid(uidHex);
+    clearPlaylist();
+    startFolderPlaybackForUid(uidHex);
     lastUid = uidHex;
   }
 
   rfid.PICC_HaltA();
   rfid.PCD_StopCrypto1();
-}
-
-static void onAudioEvent(Audio::msg_t m) {
-  if (m.e == Audio::evt_eof) {
-    Serial.println("MP3 playback ended");
-    isPlaying = false;
-  }
 }
