@@ -5,6 +5,8 @@ void setup() {
 
   spiSetup();
   filesSetup();
+  configSetup();
+  webSetup();
   buttonSetup();
   rfidSetup();
   audioSetup();
@@ -12,6 +14,7 @@ void setup() {
 }
 
 void loop() {
+  webLoop();
   buttonLoop();
   audioLoop();
   rfidLoop();

@@ -43,6 +43,29 @@ void rfidLoop() {
   Serial.print("Scanned UID: ");
   Serial.println(uidHex);
 
+  if (adminRfid.length() > 0 && uidHex == adminRfid) {
+    Serial.println("Admin tag scanned");
+
+    stopPlayback();
+    clearPlaylist();
+
+    if (webIsEnabled()) {
+      webDisable();
+    } else {
+      webEnable();
+    }
+
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return;
+  }
+
+  if (webIsEnabled()) {
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return;
+  }
+
   if (!(uidHex == lastUid && isPlaying)) {
     stopPlayback();
     clearPlaylist();
