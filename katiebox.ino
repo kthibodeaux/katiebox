@@ -1,18 +1,9 @@
 #include <Arduino.h>
-#include <EasyButton.h>
 #include <SPI.h>
 #include <SD.h>
 #include "Audio.h"
 
 String AUDIO_ROOT = "/audio";
-
-// Button pins
-static constexpr int PIN_BUTTON_VOL_DOWN  = 16;
-static constexpr int PIN_BUTTON_VOL_UP    = 17;
-static constexpr int PIN_BUTTON_NEXT_SONG = 18;
-EasyButton buttonVolDown(PIN_BUTTON_VOL_DOWN);
-EasyButton buttonVolUp(PIN_BUTTON_VOL_UP);
-EasyButton buttonNextSong(PIN_BUTTON_NEXT_SONG);
 
 // SPI pins
 static constexpr int PIN_SPI_SCK  = 12;
@@ -45,7 +36,7 @@ static volatile bool trackEnded = false;
 // Forward declare
 static void onAudioEvent(Audio::msg_t m);
 
-static void increaseVolume() {
+void increaseVolume() {
   if (volumeLevel < 21) {
     volumeLevel++;
     audio.setVolume(volumeLevel);
@@ -54,7 +45,7 @@ static void increaseVolume() {
   }
 }
 
-static void decreaseVolume() {
+void decreaseVolume() {
   if (volumeLevel > 1) {
     volumeLevel--;
     audio.setVolume(volumeLevel);
@@ -188,7 +179,7 @@ static void stopPlayback() {
   isPlaying = false;
 }
 
-static void playNextTrack() {
+void playNextTrack() {
   trackEnded = false;
   isPlaying = false;
 
@@ -255,21 +246,12 @@ void setup() {
   Serial.begin(115200);
   delay(500);
 
-  pinMode(PIN_BUTTON_VOL_DOWN, INPUT);
-  buttonVolDown.begin();
-  buttonVolDown.onPressed(decreaseVolume);
-  pinMode(PIN_BUTTON_VOL_UP, INPUT);
-  buttonVolUp.begin();
-  buttonVolUp.onPressed(increaseVolume);
-  pinMode(PIN_BUTTON_NEXT_SONG, INPUT);
-  buttonNextSong.begin();
-  buttonNextSong.onPressed(playNextTrack);
-
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
 
   pinMode(PIN_SD_CS, OUTPUT);
   digitalWrite(PIN_SD_CS, HIGH);
 
+  buttonSetup();
   rfidSetup();
 
   if (!SD.begin(PIN_SD_CS, SPI)) {
@@ -287,10 +269,7 @@ void setup() {
 }
 
 void loop() {
-  // Check for input
-  buttonVolDown.read();
-  buttonVolUp.read();
-  buttonNextSong.read();
+  buttonLoop();
 
   // Keep audio flowing
   audio.loop();
