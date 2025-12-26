@@ -27,7 +27,7 @@ void rfidSetup() {
   rfid.PCD_Init();
   Serial.print("RC522 Version: 0x");
   Serial.println(rfid.PCD_ReadRegister(rfid.VersionReg), HEX);
-  Serial.println("✅ RFID initialized");
+  Serial.println("RFID initialized");
 }
 
 void rfidLoop() {
