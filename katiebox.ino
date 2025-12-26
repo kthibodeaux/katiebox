@@ -5,6 +5,8 @@
 #include <MFRC522.h>
 #include "Audio.h"
 
+String AUDIO_ROOT = "/audio";
+
 // Button pins
 static constexpr int PIN_BUTTON_VOL_DOWN  = 16;
 static constexpr int PIN_BUTTON_VOL_UP    = 17;
@@ -102,7 +104,7 @@ static void sortPlaylist() {
 static String findFolderForUid(const String &uidHex) {
   const String prefix = uidHex + "-";
 
-  File root = SD.open("/");
+  File root = SD.open(AUDIO_ROOT);
   if (!root) {
     Serial.println("❌ Failed to open root directory");
     return "";
@@ -115,7 +117,7 @@ static String findFolderForUid(const String &uidHex) {
       if (name.startsWith(prefix)) {
         entry.close();
         root.close();
-        return "/" + name; // return full path
+        return AUDIO_ROOT + "/" + name; // return full path
       }
     }
     entry.close();
@@ -307,7 +309,7 @@ void setup() {
 
   Audio::audio_info_callback = onAudioEvent;
 
-  Serial.println("Scan a tag to play files from /<UID>-description/ in order");
+  Serial.println("Ready to play!");
 }
 
 void loop() {
