@@ -1,14 +1,8 @@
 #include <Arduino.h>
-#include <SPI.h>
 #include <SD.h>
 #include "Audio.h"
 
 String AUDIO_ROOT = "/audio";
-
-// SPI pins
-static constexpr int PIN_SPI_SCK  = 12;
-static constexpr int PIN_SPI_MOSI = 11;
-static constexpr int PIN_SPI_MISO = 13;
 
 // SD
 static constexpr int PIN_SD_CS = 10;
@@ -246,7 +240,7 @@ void setup() {
   Serial.begin(115200);
   delay(500);
 
-  SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
+  spiSetup();
 
   pinMode(PIN_SD_CS, OUTPUT);
   digitalWrite(PIN_SD_CS, HIGH);
