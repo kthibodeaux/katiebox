@@ -11,6 +11,26 @@ bool endsWithMp3(const String &name) {
   return lower.endsWith(".mp3");
 }
 
+static int countMp3FilesInFolder(const String &folderPath) {
+  File dir = SD.open(folderPath.c_str());
+  if (!dir) return 0;
+  if (!dir.isDirectory()) { dir.close(); return 0; }
+
+  int count = 0;
+  File entry = dir.openNextFile();
+  while (entry) {
+    if (!entry.isDirectory()) {
+      String name = basenameOf(entry.name());
+      if (endsWithMp3(name)) count++;
+    }
+    entry.close();
+    entry = dir.openNextFile();
+  }
+
+  dir.close();
+  return count;
+}
+
 String findFolderForUid(const String &uidHex) {
   const String prefix = uidHex + "-";
 

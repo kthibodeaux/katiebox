@@ -3,8 +3,87 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="/simple-v1.min.css">
+    <title>Katiebox</title>
   </head>
   <body>
     <h1>Katiebox</h1>
+    <table>
+      <thead>
+        <tr>
+          <th>Folder</th>
+          <th>Description</th>
+          <th>Files</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="folder-list">
+        <tr><td colspan="4">Loading...</td></tr>
+      </tbody>
+    </table>
+    <script>
+      async function loadIndex() {
+        const tbody = document.getElementById("folder-list")
+        if (!tbody) return
+
+        try {
+          const res = await fetch("/api/index.json", { cache: "no-store" })
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          const data = await res.json()
+
+          const folders = Array.isArray(data.folders) ? data.folders : []
+
+          if (folders.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="4">No folders found.</td></tr>`
+            return
+          }
+
+          tbody.innerHTML = ""
+
+          for (const f of folders) {
+            const uid = f.uid || ""
+            const desc = f.description || ""
+            const nameParam = encodeURIComponent(f.name)
+
+            const tr = document.createElement("tr")
+
+            const tdUid = document.createElement("td")
+            if (f.isLastScanned) {
+              const lastScanned = document.createElement("span")
+              lastScanned.textContent = "-> "
+              tdUid.appendChild(lastScanned)
+            }
+            const aUid = document.createElement("a")
+            aUid.href = `folder.html?name=${nameParam}`
+            aUid.textContent = (uid || "(unknown)")
+            tdUid.appendChild(aUid)
+
+            const tdDesc = document.createElement("td")
+            tdDesc.textContent = desc
+
+            const tdEdit = document.createElement("td")
+            const aEdit = document.createElement("a")
+            aEdit.href = "#"
+            aEdit.textContent = "edit"
+            tdEdit.appendChild(aEdit)
+
+            const tdFiles = document.createElement("td")
+            tdFiles.textContent = f.mp3Count != null ? f.mp3Count.toString() : "0"
+
+            tr.appendChild(tdUid)
+            tr.appendChild(tdDesc)
+            tr.appendChild(tdFiles)
+            tr.appendChild(tdEdit)
+
+            tbody.appendChild(tr)
+          }
+        } catch (err) {
+          console.error(err)
+          tbody.innerHTML = `<tr><td colspan="4">Failed to load index.</td></tr>`
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", loadIndex)
+    </script>
   </body>
 </html>

@@ -5,23 +5,74 @@
 
 extern String wifiSsid;
 extern String wifiPass;
+extern String lastScannedUid;
+extern String AUDIO_ROOT;
 
 static WebServer server(80);
 static bool webEnabled = false;
 
-static bool serveIndexHtml() {
-  if (!SD.exists("/www/index.html")) {
-    server.send(404, "text/plain", "Missing /www/index.html");
+static String contentTypeForPath(const String &path) {
+  if (path.endsWith(".html")) return "text/html; charset=utf-8";
+  if (path.endsWith(".css"))  return "text/css; charset=utf-8";
+  if (path.endsWith(".js"))   return "application/javascript; charset=utf-8";
+  return "application/octet-stream";
+}
+
+static String jsonEscape(const String &s) {
+  String out;
+  out.reserve(s.length() + 8);
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '\\' || c == '"') { out += '\\'; out += c; }
+    else if (c == '\n') out += "\\n";
+    else if (c == '\r') out += "\\r";
+    else if (c == '\t') out += "\\t";
+    else out += c;
+  }
+  return out;
+}
+
+static String basenameOf(const String &path) {
+  int slash = path.lastIndexOf('/');
+  if (slash >= 0) return path.substring(slash + 1);
+  return path;
+}
+
+static void splitFolderName(const String &folderName, String &uidOut, String &descOut) {
+  int dash = folderName.indexOf('-');
+  if (dash < 0) {
+    uidOut = folderName;
+    descOut = "";
+    return;
+  }
+
+  uidOut = folderName.substring(0, dash);
+  descOut = folderName.substring(dash + 1);
+}
+
+static bool serveFileFromWww(String uri) {
+  if (uri == "/") uri = "/index.html";
+
+  // Prevent weird path traversal attempts
+  if (uri.indexOf("..") >= 0) {
+    server.send(400, "text/plain; charset=utf-8", "Bad path");
     return true;
   }
 
-  File f = SD.open("/www/index.html", FILE_READ);
+  const String path = "/www" + uri;
+
+  if (!SD.exists(path.c_str())) {
+    server.send(404, "text/plain; charset=utf-8", "Not found");
+    return true;
+  }
+
+  File f = SD.open(path.c_str(), FILE_READ);
   if (!f) {
-    server.send(500, "text/plain", "Failed to open index.html");
+    server.send(500, "text/plain; charset=utf-8", "Failed to open file");
     return true;
   }
 
-  server.streamFile(f, "text/html");
+  server.streamFile(f, contentTypeForPath(path));
   f.close();
   return true;
 }
@@ -37,11 +88,8 @@ static bool connectWifi() {
 
   WiFi.mode(WIFI_STA);
 
-  if (wifiPass.length() == 0) {
-    WiFi.begin(wifiSsid.c_str());
-  } else {
-    WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
-  }
+  if (wifiPass.length() == 0) WiFi.begin(wifiSsid.c_str());
+  else WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
 
   uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
@@ -60,16 +108,70 @@ static bool connectWifi() {
   return true;
 }
 
-static void handleRoot() {
-  serveIndexHtml();
+static void handleNotFound() {
+  serveFileFromWww(server.uri());
 }
 
-static void handleStatusJson() {
-  String body = "{";
-  body += "\"lastUid\":\"";
-  body += lastScannedUid;
-  body += "\"}";
-  server.send(200, "application/json", body);
+static void handleIndexJson() {
+  // Open audio root
+  File root = SD.open(AUDIO_ROOT.c_str());
+  if (!root) {
+    server.send(500, "application/json; charset=utf-8", "{\"error\":\"failed to open audio root\"}");
+    return;
+  }
+  if (!root.isDirectory()) {
+    root.close();
+    server.send(500, "application/json; charset=utf-8", "{\"error\":\"audio root not a directory\"}");
+    return;
+  }
+
+  String body;
+  body.reserve(2048);
+  body += "{\"folders\":[";
+
+  bool first = true;
+
+  File entry = root.openNextFile();
+  while (entry) {
+    if (entry.isDirectory()) {
+      String folderName = basenameOf(entry.name()); // e.g. "04A1C29F-pokemon"
+      String uid, desc;
+      splitFolderName(folderName, uid, desc);
+
+      // Determine "isLastScanned" by comparing UID portion to lastScannedUid
+      bool isLast = (lastScannedUid.length() > 0 && uid == lastScannedUid);
+
+      // Count mp3 files inside the directory
+      // Build full folder path: AUDIO_ROOT + "/" + folderName
+      String folderPath = AUDIO_ROOT;
+      if (!folderPath.endsWith("/")) folderPath += "/";
+      folderPath += folderName;
+
+      int mp3Count = countMp3FilesInFolder(folderPath);
+
+      if (!first) body += ",";
+      first = false;
+
+      body += "{";
+      body += "\"name\":\"" + jsonEscape(folderName) + "\",";
+      body += "\"uid\":\"" + jsonEscape(uid) + "\",";
+      body += "\"description\":\"" + jsonEscape(desc) + "\",";
+      body += "\"isLastScanned\":";
+      body += (isLast ? "true" : "false");
+      body += ",";
+      body += "\"mp3Count\":";
+      body += String(mp3Count);
+      body += "}";
+    }
+
+    entry.close();
+    entry = root.openNextFile();
+  }
+
+  root.close();
+
+  body += "]}";
+  server.send(200, "application/json; charset=utf-8", body);
 }
 
 void webSetup() {
@@ -83,10 +185,12 @@ void webEnable() {
 
   if (!connectWifi()) return;
 
-  server.on("/", HTTP_GET, handleRoot);
-  server.on("/api/status.json", HTTP_GET, handleStatusJson);
-  server.begin();
+  server.on("/api/index.json",  HTTP_GET, handleIndexJson);
 
+  // Static file fallback (index.html, style.css, folder.html, etc)
+  server.onNotFound(handleNotFound);
+
+  server.begin();
   Serial.println("HTTP server started");
   webEnabled = true;
 }
@@ -104,9 +208,7 @@ void webDisable() {
 }
 
 void webLoop() {
-  if (webEnabled) {
-    server.handleClient();
-  }
+  if (webEnabled) server.handleClient();
 }
 
 bool webIsEnabled() {
