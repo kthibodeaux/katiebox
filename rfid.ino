@@ -7,6 +7,7 @@ uint32_t SCAN_DEBOUNCE_MS = 800;
 MFRC522 rfid(PIN_RFID_SS, PIN_RFID_RST);
 
 static String lastUid = "";
+String lastScannedUid = "";
 static uint32_t lastScanMs = 0;
 
 String uidToHexUpper(const byte *uidBytes, byte size) {
@@ -40,6 +41,7 @@ void rfidLoop() {
   lastScanMs = now;
 
   const String uidHex = uidToHexUpper(rfid.uid.uidByte, rfid.uid.size);
+  lastScannedUid = uidHex;
   Serial.print("Scanned UID: ");
   Serial.println(uidHex);
 

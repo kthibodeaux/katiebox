@@ -64,6 +64,14 @@ static void handleRoot() {
   serveIndexHtml();
 }
 
+static void handleStatusJson() {
+  String body = "{";
+  body += "\"lastUid\":\"";
+  body += lastScannedUid;
+  body += "\"}";
+  server.send(200, "application/json", body);
+}
+
 void webSetup() {
   webEnabled = false;
 }
@@ -76,6 +84,7 @@ void webEnable() {
   if (!connectWifi()) return;
 
   server.on("/", HTTP_GET, handleRoot);
+  server.on("/api/status.json", HTTP_GET, handleStatusJson);
   server.begin();
 
   Serial.println("HTTP server started");
