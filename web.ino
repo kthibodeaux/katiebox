@@ -464,6 +464,60 @@ static void handleRenameFile() {
   server.send(200, "application/json; charset=utf-8", body);
 }
 
+static void handleDeleteFile() {
+  if (server.method() != HTTP_POST) {
+    server.send(405, "application/json; charset=utf-8", "{\"error\":\"method not allowed\"}");
+    return;
+  }
+
+  if (!server.hasArg("folder") || !server.hasArg("name")) {
+    server.send(400, "application/json; charset=utf-8", "{\"error\":\"missing folder/name\"}");
+    return;
+  }
+
+  String folder = server.arg("folder");
+  String name = server.arg("name");
+  folder.trim();
+  name.trim();
+
+  if (!isSafeSegment(folder) || !isSafeSegment(name)) {
+    server.send(400, "application/json; charset=utf-8", "{\"error\":\"invalid folder or filename\"}");
+    return;
+  }
+
+  {
+    String lower = name;
+    lower.toLowerCase();
+    if (!lower.endsWith(".mp3")) {
+      server.send(400, "application/json; charset=utf-8", "{\"error\":\"only .mp3 can be deleted\"}");
+      return;
+    }
+  }
+
+  String path = joinPath3(AUDIO_ROOT, folder, name);
+
+  if (!SD.exists(path.c_str())) {
+    server.send(404, "application/json; charset=utf-8", "{\"error\":\"file not found\"}");
+    return;
+  }
+
+  bool ok = SD.remove(path.c_str());
+  if (!ok) {
+    server.send(500, "application/json; charset=utf-8", "{\"error\":\"delete failed\"}");
+    return;
+  }
+
+  String body;
+  body.reserve(256);
+  body += "{";
+  body += "\"ok\":true,";
+  body += "\"folder\":\"" + jsonEscape(folder) + "\",";
+  body += "\"name\":\"" + jsonEscape(name) + "\"";
+  body += "}";
+
+  server.send(200, "application/json; charset=utf-8", body);
+}
+
 void webSetup() {
   webEnabled = false;
 }
@@ -479,6 +533,7 @@ void webEnable() {
   server.on("/api/folder.json", HTTP_GET, handleFolderJson);
   server.on("/api/rename_folder.json", HTTP_POST, handleRenameFolder);
   server.on("/api/rename_file.json",   HTTP_POST, handleRenameFile);
+  server.on("/api/delete_file.json", HTTP_POST, handleDeleteFile);
 
   // Static file fallback (index.html, style.css, folder.html, etc)
   server.onNotFound(handleNotFound);

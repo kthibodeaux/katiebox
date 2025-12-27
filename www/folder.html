@@ -48,6 +48,26 @@
         return await res.json()
       }
 
+      async function postDeleteFile(folderName, filename) {
+        const body = new URLSearchParams({
+          folder: folderName,
+          name: filename,
+        })
+
+        const res = await fetch("/api/delete_file.json", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: body.toString(),
+        })
+
+        if (!res.ok) {
+          const text = await res.text()
+          throw new Error(`HTTP ${res.status}: ${text}`)
+        }
+
+        return await res.json()
+      }
+
       function enterEditMode({ tr, tdName, tdEdit, folderName, currentFile }) {
         const input = document.createElement("input")
         input.type = "text"
@@ -79,6 +99,12 @@
           aEdit.textContent = "edit"
           tdEdit.appendChild(aEdit)
 
+          const aDelete = document.createElement("a")
+          aDelete.href = "#"
+          aDelete.textContent = "delete"
+          tdEdit.appendChild(document.createTextNode(" "))
+          tdEdit.appendChild(aDelete)
+
           aEdit.addEventListener("click", (e) => {
             e.preventDefault()
             enterEditMode({
@@ -88,6 +114,11 @@
               folderName,
               currentFile: filenameText,
             })
+          })
+
+          aDelete.addEventListener("click", async (e) => {
+            e.preventDefault()
+            await maybeDeleteRow({ tr, folderName, filename: filenameText })
           })
         }
 
@@ -148,6 +179,24 @@
         input.select()
       }
 
+      async function maybeDeleteRow({ tr, folderName, filename }) {
+        const ok = confirm(`Delete "${filename}"?`)
+        if (!ok) return
+
+        try {
+          await postDeleteFile(folderName, filename)
+          tr.remove()
+
+          const tbody = document.getElementById("file-list")
+          if (tbody && tbody.children.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="2">No files found.</td></tr>`
+          }
+        } catch (err) {
+          console.error(err)
+          alert(`Failed to delete: ${err.message}`)
+        }
+      }
+
       async function loadFolder() {
         const folderName = getQueryParam("name")
         const tbody = document.getElementById("file-list")
@@ -191,10 +240,17 @@
             tdName.textContent = filename
 
             const tdEdit = document.createElement("td")
+
             const aEdit = document.createElement("a")
             aEdit.href = "#"
             aEdit.textContent = "edit"
             tdEdit.appendChild(aEdit)
+
+            const aDelete = document.createElement("a")
+            aDelete.href = "#"
+            aDelete.textContent = "delete"
+            tdEdit.appendChild(document.createTextNode(" "))
+            tdEdit.appendChild(aDelete)
 
             aEdit.addEventListener("click", (e) => {
               e.preventDefault()
@@ -204,6 +260,15 @@
                 tdEdit,
                 folderName: data.name || folderName,
                 currentFile: filename,
+              })
+            })
+
+            aDelete.addEventListener("click", async (e) => {
+              e.preventDefault()
+              await maybeDeleteRow({
+                tr,
+                folderName: data.name || folderName,
+                filename,
               })
             })
 
