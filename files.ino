@@ -31,12 +31,12 @@ static int countMp3FilesInFolder(const String &folderPath) {
   return count;
 }
 
-String findFolderForUid(const String &uidHex) {
+static String findFolderForUid(const String &uidHex) {
   const String prefix = uidHex + "-";
 
   File root = SD.open(AUDIO_ROOT);
   if (!root) {
-    Serial.println("Failed to open root directory");
+    Serial.println("Failed to open audio root");
     return "";
   }
 
@@ -44,18 +44,48 @@ String findFolderForUid(const String &uidHex) {
   while (entry) {
     if (entry.isDirectory()) {
       String name = entry.name();
+      int slash = name.lastIndexOf('/');
+      if (slash >= 0) name = name.substring(slash + 1);
+
       if (name.startsWith(prefix)) {
         entry.close();
         root.close();
         return AUDIO_ROOT + "/" + name;
       }
     }
+
     entry.close();
     entry = root.openNextFile();
   }
 
   root.close();
   return "";
+}
+
+static String findOrCreateFolderForUid(const String &uidHex) {
+  String existing = findFolderForUid(uidHex);
+  if (existing.length() > 0) return existing;
+
+  String folderPath = AUDIO_ROOT;
+  if (!folderPath.endsWith("/")) folderPath += "/";
+  folderPath += uidHex;
+  folderPath += "-new";
+
+  if (SD.exists(folderPath.c_str())) {
+    Serial.print("Folder already exists (unexpected): ");
+    Serial.println(folderPath);
+    return folderPath;
+  }
+
+  if (!SD.mkdir(folderPath.c_str())) {
+    Serial.print("Failed to create folder: ");
+    Serial.println(folderPath);
+    return "";
+  }
+
+  Serial.print("Created folder: ");
+  Serial.println(folderPath);
+  return folderPath;
 }
 
 static int collectMp3Files(const String &folderPath, String *outFiles, int maxFiles) {

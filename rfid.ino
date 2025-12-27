@@ -63,6 +63,9 @@ void rfidLoop() {
   }
 
   if (webIsEnabled()) {
+    if (adminRfid.length() > 0 && uidHex != adminRfid) {
+      findOrCreateFolderForUid(uidHex);
+    }
     rfid.PICC_HaltA();
     rfid.PCD_StopCrypto1();
     return;
