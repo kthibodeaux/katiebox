@@ -14,7 +14,7 @@ void setup() {
 }
 
 void loop() {
-  if (webIsEnabled) {
+  if (webIsEnabled()) {
     webLoop();
   } else {
     buttonLoop();
