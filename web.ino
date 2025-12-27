@@ -62,6 +62,23 @@ static void appendStringArrayJson(String &out, String *arr, int count) {
   out += "]";
 }
 
+static bool isSafeSegment(const String &s) {
+  if (s.length() == 0) return false;
+  if (s.indexOf("..") >= 0) return false;
+  if (s.indexOf('/') >= 0) return false;
+  if (s.indexOf('\\') >= 0) return false;
+  return true;
+}
+
+static String joinPath3(const String &a, const String &b, const String &c) {
+  String p = a;
+  if (!p.endsWith("/")) p += "/";
+  p += b;
+  if (!p.endsWith("/")) p += "/";
+  p += c;
+  return p;
+}
+
 static bool serveFileFromWww(String uri) {
   if (uri == "/") uri = "/index.html";
 
@@ -313,6 +330,139 @@ static void handleFolderJson() {
   server.send(200, "application/json; charset=utf-8", body);
 }
 
+static bool isSafeFolderName(const String &name) {
+  if (name.length() == 0) return false;
+  if (name.indexOf("..") >= 0) return false;
+  if (name.indexOf('/') >= 0) return false;
+  if (name.indexOf('\\') >= 0) return false;
+  return true;
+}
+
+static String audioPathForFolderName(const String &folderName) {
+  String p = AUDIO_ROOT;
+  if (!p.endsWith("/")) p += "/";
+  p += folderName;
+  return p;
+}
+
+static void handleRenameFolder() {
+  // Expect: POST current=<old> next=<new>
+  if (server.method() != HTTP_POST) {
+    server.send(405, "application/json; charset=utf-8", "{\"error\":\"method not allowed\"}");
+    return;
+  }
+
+  if (!server.hasArg("current") || !server.hasArg("next")) {
+    server.send(400, "application/json; charset=utf-8", "{\"error\":\"missing current/next\"}");
+    return;
+  }
+
+  String current = server.arg("current");
+  String next = server.arg("next");
+  current.trim();
+  next.trim();
+
+  if (!isSafeFolderName(current) || !isSafeFolderName(next)) {
+    server.send(400, "application/json; charset=utf-8", "{\"error\":\"invalid folder name\"}");
+    return;
+  }
+
+  String oldPath = audioPathForFolderName(current);
+  String newPath = audioPathForFolderName(next);
+
+  if (!SD.exists(oldPath.c_str())) {
+    server.send(404, "application/json; charset=utf-8", "{\"error\":\"current folder not found\"}");
+    return;
+  }
+
+  if (SD.exists(newPath.c_str())) {
+    server.send(409, "application/json; charset=utf-8", "{\"error\":\"target already exists\"}");
+    return;
+  }
+
+  bool ok = SD.rename(oldPath.c_str(), newPath.c_str());
+  if (!ok) {
+    server.send(500, "application/json; charset=utf-8", "{\"error\":\"rename failed\"}");
+    return;
+  }
+
+  String body = "{";
+  body += "\"ok\":true,";
+  body += "\"current\":\"" + jsonEscape(current) + "\",";
+  body += "\"next\":\"" + jsonEscape(next) + "\"";
+  body += "}";
+
+  server.send(200, "application/json; charset=utf-8", body);
+}
+
+static void handleRenameFile() {
+  if (server.method() != HTTP_POST) {
+    server.send(405, "application/json; charset=utf-8", "{\"error\":\"method not allowed\"}");
+    return;
+  }
+
+  if (!server.hasArg("folder") || !server.hasArg("current") || !server.hasArg("next")) {
+    server.send(400, "application/json; charset=utf-8", "{\"error\":\"missing folder/current/next\"}");
+    return;
+  }
+
+  String folder = server.arg("folder");
+  String current = server.arg("current");
+  String next = server.arg("next");
+
+  folder.trim();
+  current.trim();
+  next.trim();
+
+  if (!isSafeSegment(folder) || !isSafeSegment(current) || !isSafeSegment(next)) {
+    server.send(400, "application/json; charset=utf-8", "{\"error\":\"invalid folder or filename\"}");
+    return;
+  }
+
+  // Optional: require .mp3 extension for both old and new names
+  // (If you want to rename non-mp3 files too, delete this block.)
+  {
+    String lcCur = current; lcCur.toLowerCase();
+    String lcNext = next;   lcNext.toLowerCase();
+    if (!lcCur.endsWith(".mp3") || !lcNext.endsWith(".mp3")) {
+      server.send(400, "application/json; charset=utf-8", "{\"error\":\"filenames must end with .mp3\"}");
+      return;
+    }
+  }
+
+  // Build full paths
+  // oldPath = /audio/<folder>/<current>
+  // newPath = /audio/<folder>/<next>
+  String oldPath = joinPath3(AUDIO_ROOT, folder, current);
+  String newPath = joinPath3(AUDIO_ROOT, folder, next);
+
+  if (!SD.exists(oldPath.c_str())) {
+    server.send(404, "application/json; charset=utf-8", "{\"error\":\"current file not found\"}");
+    return;
+  }
+
+  if (SD.exists(newPath.c_str())) {
+    server.send(409, "application/json; charset=utf-8", "{\"error\":\"target already exists\"}");
+    return;
+  }
+
+  bool ok = SD.rename(oldPath.c_str(), newPath.c_str());
+  if (!ok) {
+    server.send(500, "application/json; charset=utf-8", "{\"error\":\"rename failed\"}");
+    return;
+  }
+
+  String body;
+  body.reserve(256);
+  body += "{";
+  body += "\"ok\":true,";
+  body += "\"folder\":\"" + jsonEscape(folder) + "\",";
+  body += "\"current\":\"" + jsonEscape(current) + "\",";
+  body += "\"next\":\"" + jsonEscape(next) + "\"";
+  body += "}";
+
+  server.send(200, "application/json; charset=utf-8", body);
+}
 
 void webSetup() {
   webEnabled = false;
@@ -327,6 +477,8 @@ void webEnable() {
 
   server.on("/api/index.json",  HTTP_GET, handleIndexJson);
   server.on("/api/folder.json", HTTP_GET, handleFolderJson);
+  server.on("/api/rename_folder.json", HTTP_POST, handleRenameFolder);
+  server.on("/api/rename_file.json",   HTTP_POST, handleRenameFile);
 
   // Static file fallback (index.html, style.css, folder.html, etc)
   server.onNotFound(handleNotFound);

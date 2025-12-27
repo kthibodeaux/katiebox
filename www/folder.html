@@ -27,6 +27,127 @@
         return params.get(name)
       }
 
+      async function postRenameFile(folderName, currentFile, nextFile) {
+        const body = new URLSearchParams({
+          folder: folderName,
+          current: currentFile,
+          next: nextFile,
+        })
+
+        const res = await fetch("/api/rename_file.json", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: body.toString(),
+        })
+
+        if (!res.ok) {
+          const text = await res.text()
+          throw new Error(`HTTP ${res.status}: ${text}`)
+        }
+
+        return await res.json()
+      }
+
+      function enterEditMode({ tr, tdName, tdEdit, folderName, currentFile }) {
+        const input = document.createElement("input")
+        input.type = "text"
+        input.value = currentFile
+        input.size = Math.max(10, currentFile.length || 10)
+
+        const go = document.createElement("a")
+        go.href = "#"
+        go.textContent = "go"
+
+        const cancel = document.createElement("a")
+        cancel.href = "#"
+        cancel.textContent = "cancel"
+
+        tdName.textContent = ""
+        tdName.appendChild(input)
+
+        tdEdit.textContent = ""
+        tdEdit.appendChild(go)
+        tdEdit.appendChild(document.createTextNode(" "))
+        tdEdit.appendChild(cancel)
+
+        const restoreView = (filenameText) => {
+          tdName.textContent = filenameText
+
+          tdEdit.textContent = ""
+          const aEdit = document.createElement("a")
+          aEdit.href = "#"
+          aEdit.textContent = "edit"
+          tdEdit.appendChild(aEdit)
+
+          aEdit.addEventListener("click", (e) => {
+            e.preventDefault()
+            enterEditMode({
+              tr,
+              tdName,
+              tdEdit,
+              folderName,
+              currentFile: filenameText,
+            })
+          })
+        }
+
+        cancel.addEventListener("click", (e) => {
+          e.preventDefault()
+          restoreView(currentFile)
+        })
+
+        const performRename = async () => {
+          const nextFile = input.value.trim()
+          if (nextFile.length === 0) {
+            input.focus()
+            return
+          }
+
+          if (nextFile === currentFile) {
+            restoreView(nextFile)
+            return
+          }
+
+          input.disabled = true
+          go.textContent = "saving..."
+          go.style.pointerEvents = "none"
+          cancel.style.pointerEvents = "none"
+
+          try {
+            await postRenameFile(folderName, currentFile, nextFile)
+            currentFile = nextFile
+            restoreView(nextFile)
+          } catch (err) {
+            console.error(err)
+            input.disabled = false
+            go.textContent = "go"
+            go.style.pointerEvents = ""
+            cancel.style.pointerEvents = ""
+
+            tdName.textContent = `Failed: ${err.message}`
+            setTimeout(() => {
+              tdName.textContent = ""
+              tdName.appendChild(input)
+              input.focus()
+              input.select()
+            }, 1200)
+          }
+        }
+
+        go.addEventListener("click", (e) => {
+          e.preventDefault()
+          performRename()
+        })
+
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") performRename()
+          if (e.key === "Escape") restoreView(currentFile)
+        })
+
+        input.focus()
+        input.select()
+      }
+
       async function loadFolder() {
         const folderName = getQueryParam("name")
         const tbody = document.getElementById("file-list")
@@ -50,6 +171,8 @@
             title.textContent = data.description
               ? `${data.uid} – ${data.description}`
               : data.uid
+          } else {
+            title.textContent = folderName
           }
 
           const files = Array.isArray(data.files) ? data.files : []
@@ -72,6 +195,17 @@
             aEdit.href = "#"
             aEdit.textContent = "edit"
             tdEdit.appendChild(aEdit)
+
+            aEdit.addEventListener("click", (e) => {
+              e.preventDefault()
+              enterEditMode({
+                tr,
+                tdName,
+                tdEdit,
+                folderName: data.name || folderName,
+                currentFile: filename,
+              })
+            })
 
             tr.appendChild(tdName)
             tr.appendChild(tdEdit)

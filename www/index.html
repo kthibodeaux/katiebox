@@ -21,69 +21,233 @@
         <tr><td colspan="4">Loading...</td></tr>
       </tbody>
     </table>
+
     <script>
+      async function postRenameFolder(currentName, nextName) {
+        const body = new URLSearchParams({ current: currentName, next: nextName });
+
+        const res = await fetch("/api/rename_folder.json", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: body.toString(),
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`HTTP ${res.status}: ${text}`);
+        }
+
+        return await res.json();
+      }
+
+      function isSafeDesc(desc) {
+        // Keep this permissive; server should enforce stricter rules.
+        // We'll just trim and disallow empty.
+        return desc.trim().length > 0;
+      }
+
+      function makeFolderName(uid, desc) {
+        // Folder naming convention: UID-desc
+        // Do not allow '-' in desc here; server can also enforce.
+        const cleaned = desc.trim();
+        return `${uid}-${cleaned}`;
+      }
+
+      function enterEditMode({ tr, tdDesc, tdEdit, uid, currentName, currentDesc }) {
+        // Description input
+        const input = document.createElement("input");
+        input.type = "text";
+        input.value = currentDesc;
+        input.size = Math.max(10, currentDesc.length || 10);
+
+        // Go link/button
+        const go = document.createElement("a");
+        go.href = "#";
+        go.textContent = "go";
+
+        // Cancel link
+        const cancel = document.createElement("a");
+        cancel.href = "#";
+        cancel.textContent = "cancel";
+
+        // Replace description cell with input
+        tdDesc.textContent = "";
+        tdDesc.appendChild(input);
+
+        // Replace edit cell with go + cancel
+        tdEdit.textContent = "";
+        tdEdit.appendChild(go);
+        tdEdit.appendChild(document.createTextNode(" "));
+        tdEdit.appendChild(cancel);
+
+        // Handlers
+        const exitToView = (newDescText) => {
+          tdDesc.textContent = newDescText;
+
+          tdEdit.textContent = "";
+          const aEdit = document.createElement("a");
+          aEdit.href = "#";
+          aEdit.textContent = "edit";
+          tdEdit.appendChild(aEdit);
+
+          aEdit.addEventListener("click", (e) => {
+            e.preventDefault();
+            enterEditMode({
+              tr,
+              tdDesc,
+              tdEdit,
+              uid,
+              currentName,
+              currentDesc: newDescText,
+            });
+          });
+        };
+
+        cancel.addEventListener("click", (e) => {
+          e.preventDefault();
+          exitToView(currentDesc);
+        });
+
+        const performRename = async () => {
+          const nextDesc = input.value.trim();
+          if (!isSafeDesc(nextDesc)) {
+            input.focus();
+            return;
+          }
+
+          const nextName = makeFolderName(uid, nextDesc);
+
+          // If unchanged, just exit edit mode
+          if (nextName === currentName) {
+            exitToView(nextDesc);
+            return;
+          }
+
+          // Disable controls while running
+          input.disabled = true;
+          go.textContent = "saving...";
+          go.style.pointerEvents = "none";
+          cancel.style.pointerEvents = "none";
+
+          try {
+            await postRenameFolder(currentName, nextName);
+
+            // Update currentName for next edits and folder link in col 1
+            // (col 1 is: [maybe arrow] + <a>)
+            const link = tr.querySelector("td a");
+            if (link) {
+              link.href = `folder.html?name=${encodeURIComponent(nextName)}`;
+            }
+
+            // Update closure vars and exit
+            currentName = nextName;
+            exitToView(nextDesc);
+          } catch (err) {
+            console.error(err);
+            input.disabled = false;
+            go.textContent = "go";
+            go.style.pointerEvents = "";
+            cancel.style.pointerEvents = "";
+
+            // Show error in description cell temporarily
+            tdDesc.textContent = `Failed: ${err.message}`;
+            setTimeout(() => {
+              tdDesc.textContent = "";
+              tdDesc.appendChild(input);
+              input.focus();
+            }, 1200);
+          }
+        };
+
+        go.addEventListener("click", (e) => {
+          e.preventDefault();
+          performRename();
+        });
+
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") performRename();
+          if (e.key === "Escape") exitToView(currentDesc);
+        });
+
+        input.focus();
+        input.select();
+      }
+
       async function loadIndex() {
-        const tbody = document.getElementById("folder-list")
-        if (!tbody) return
+        const tbody = document.getElementById("folder-list");
+        if (!tbody) return;
 
         try {
-          const res = await fetch("/api/index.json", { cache: "no-store" })
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          const data = await res.json()
+          const res = await fetch("/api/index.json", { cache: "no-store" });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
 
-          const folders = Array.isArray(data.folders) ? data.folders : []
+          const folders = Array.isArray(data.folders) ? data.folders : [];
 
           if (folders.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="4">No folders found.</td></tr>`
-            return
+            tbody.innerHTML = `<tr><td colspan="4">No folders found.</td></tr>`;
+            return;
           }
 
-          tbody.innerHTML = ""
+          tbody.innerHTML = "";
 
           for (const f of folders) {
-            const uid = f.uid || ""
-            const desc = f.description || ""
-            const nameParam = encodeURIComponent(f.name)
+            const uid = f.uid || "";
+            const desc = f.description || "";
+            const name = f.name || "";
+            const nameParam = encodeURIComponent(name);
 
-            const tr = document.createElement("tr")
+            const tr = document.createElement("tr");
 
-            const tdUid = document.createElement("td")
+            const tdUid = document.createElement("td");
             if (f.isLastScanned) {
-              const lastScanned = document.createElement("span")
-              lastScanned.textContent = "-> "
-              tdUid.appendChild(lastScanned)
+              const lastScanned = document.createElement("span");
+              lastScanned.textContent = "-> ";
+              tdUid.appendChild(lastScanned);
             }
-            const aUid = document.createElement("a")
-            aUid.href = `folder.html?name=${nameParam}`
-            aUid.textContent = (uid || "(unknown)")
-            tdUid.appendChild(aUid)
+            const aUid = document.createElement("a");
+            aUid.href = `folder.html?name=${nameParam}`;
+            aUid.textContent = (uid || "(unknown)");
+            tdUid.appendChild(aUid);
 
-            const tdDesc = document.createElement("td")
-            tdDesc.textContent = desc
+            const tdDesc = document.createElement("td");
+            tdDesc.textContent = desc;
 
-            const tdEdit = document.createElement("td")
-            const aEdit = document.createElement("a")
-            aEdit.href = "#"
-            aEdit.textContent = "edit"
-            tdEdit.appendChild(aEdit)
+            const tdFiles = document.createElement("td");
+            tdFiles.textContent = f.mp3Count != null ? f.mp3Count.toString() : "0";
 
-            const tdFiles = document.createElement("td")
-            tdFiles.textContent = f.mp3Count != null ? f.mp3Count.toString() : "0"
+            const tdEdit = document.createElement("td");
+            const aEdit = document.createElement("a");
+            aEdit.href = "#";
+            aEdit.textContent = "edit";
+            tdEdit.appendChild(aEdit);
 
-            tr.appendChild(tdUid)
-            tr.appendChild(tdDesc)
-            tr.appendChild(tdFiles)
-            tr.appendChild(tdEdit)
+            aEdit.addEventListener("click", (e) => {
+              e.preventDefault();
+              enterEditMode({
+                tr,
+                tdDesc,
+                tdEdit,
+                uid,
+                currentName: name,
+                currentDesc: desc,
+              });
+            });
 
-            tbody.appendChild(tr)
+            tr.appendChild(tdUid);
+            tr.appendChild(tdDesc);
+            tr.appendChild(tdFiles);
+            tr.appendChild(tdEdit);
+
+            tbody.appendChild(tr);
           }
         } catch (err) {
-          console.error(err)
-          tbody.innerHTML = `<tr><td colspan="4">Failed to load index.</td></tr>`
+          console.error(err);
+          tbody.innerHTML = `<tr><td colspan="4">Failed to load index.</td></tr>`;
         }
       }
 
-      document.addEventListener("DOMContentLoaded", loadIndex)
+      document.addEventListener("DOMContentLoaded", loadIndex);
     </script>
   </body>
 </html>
