@@ -12,6 +12,12 @@ static WebServer server(80);
 static bool webEnabled = false;
 static constexpr int MAX_FILES = 128;
 
+static File g_uploadFile;
+static String g_uploadFolder;
+static String g_uploadName;
+static size_t g_uploadBytes = 0;
+static String g_uploadError;
+
 static String contentTypeForPath(const String &path) {
   if (path.endsWith(".html")) return "text/html; charset=utf-8";
   if (path.endsWith(".css"))  return "text/css; charset=utf-8";
@@ -518,6 +524,122 @@ static void handleDeleteFile() {
   server.send(200, "application/json; charset=utf-8", body);
 }
 
+static void handleUploadMp3Upload() {
+  HTTPUpload &upload = server.upload();
+
+  if (upload.status == UPLOAD_FILE_START) {
+    g_uploadError = "";
+    g_uploadBytes = 0;
+    g_uploadFile = File();
+    g_uploadFolder = "";
+    g_uploadName = "";
+
+    if (!server.hasArg("folder")) {
+      g_uploadError = "missing folder";
+      return;
+    }
+
+    g_uploadFolder = server.arg("folder");
+    g_uploadFolder.trim();
+
+    if (!isSafeSegment(g_uploadFolder)) {
+      g_uploadError = "invalid folder";
+      return;
+    }
+
+    String fname = upload.filename;
+    int slash = fname.lastIndexOf('/');
+    if (slash >= 0) fname = fname.substring(slash + 1);
+    slash = fname.lastIndexOf('\\');
+    if (slash >= 0) fname = fname.substring(slash + 1);
+
+    fname.trim();
+
+    if (!isSafeSegment(fname)) {
+      g_uploadError = "invalid filename";
+      return;
+    }
+    if (!endsWithMp3(fname)) {
+      g_uploadError = "file must end with .mp3";
+      return;
+    }
+
+    String folderPath = AUDIO_ROOT;
+    if (!folderPath.endsWith("/")) folderPath += "/";
+    folderPath += g_uploadFolder;
+
+    if (!SD.exists(folderPath.c_str())) {
+      g_uploadError = "folder not found";
+      return;
+    }
+
+    String fullPath = joinPath3(AUDIO_ROOT, g_uploadFolder, fname);
+
+    if (SD.exists(fullPath.c_str())) {
+      g_uploadError = "file already exists";
+      return;
+    }
+
+    g_uploadFile = SD.open(fullPath.c_str(), FILE_WRITE);
+    if (!g_uploadFile) {
+      g_uploadError = "failed to open file for writing";
+      return;
+    }
+
+    g_uploadName = fname;
+    return;
+  }
+
+  if (upload.status == UPLOAD_FILE_WRITE) {
+    if (g_uploadError.length() > 0) return;
+    if (!g_uploadFile) {
+      g_uploadError = "no open file";
+      return;
+    }
+
+    size_t written = g_uploadFile.write(upload.buf, upload.currentSize);
+    g_uploadBytes += written;
+
+    if (written != upload.currentSize) {
+      g_uploadError = "short write";
+      return;
+    }
+
+    return;
+  }
+
+  if (upload.status == UPLOAD_FILE_END) {
+    if (g_uploadFile) g_uploadFile.close();
+    return;
+  }
+
+  if (upload.status == UPLOAD_FILE_ABORTED) {
+    if (g_uploadFile) g_uploadFile.close();
+    g_uploadError = "upload aborted";
+    return;
+  }
+}
+
+static void handleUploadMp3Done() {
+  if (g_uploadError.length() > 0) {
+    String body = "{\"error\":\"" + jsonEscape(g_uploadError) + "\"}";
+    server.send(400, "application/json; charset=utf-8", body);
+    return;
+  }
+
+  String body;
+  body.reserve(256);
+  body += "{";
+  body += "\"ok\":true,";
+  body += "\"folder\":\"" + jsonEscape(g_uploadFolder) + "\",";
+  body += "\"name\":\"" + jsonEscape(g_uploadName) + "\",";
+  body += "\"bytes\":";
+  body += String((unsigned long)g_uploadBytes);
+  body += "}";
+
+  server.send(200, "application/json; charset=utf-8", body);
+}
+
 void webSetup() {
   webEnabled = false;
 }
@@ -534,6 +656,7 @@ void webEnable() {
   server.on("/api/rename_folder.json", HTTP_POST, handleRenameFolder);
   server.on("/api/rename_file.json",   HTTP_POST, handleRenameFile);
   server.on("/api/delete_file.json", HTTP_POST, handleDeleteFile);
+  server.on("/api/upload_mp3", HTTP_POST, handleUploadMp3Done, handleUploadMp3Upload);
 
   // Static file fallback (index.html, style.css, folder.html, etc)
   server.onNotFound(handleNotFound);

@@ -9,6 +9,15 @@
   <body>
     <h1><a href="/">Katiebox</a></h1>
     <h2 id="folder-title">...</h2>
+
+    <section>
+      <form id="upload-form">
+        <input id="upload-file" type="file" accept=".mp3,audio/mpeg" />
+        <button id="upload-btn" type="submit">upload</button>
+        <span id="upload-status"></span>
+      </form>
+    </section>
+
     <table>
       <thead>
         <tr>
@@ -58,6 +67,24 @@
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: body.toString(),
+        })
+
+        if (!res.ok) {
+          const text = await res.text()
+          throw new Error(`HTTP ${res.status}: ${text}`)
+        }
+
+        return await res.json()
+      }
+
+      async function postUploadMp3(folderName, file) {
+        const fd = new FormData()
+        fd.append("folder", folderName)
+        fd.append("file", file, file.name)
+
+        const res = await fetch("/api/upload_mp3", {
+          method: "POST",
+          body: fd,
         })
 
         if (!res.ok) {
@@ -197,6 +224,54 @@
         }
       }
 
+      function addFileRow({ tbody, folderName, filename }) {
+        // Remove "No files found." placeholder if present
+        if (tbody.children.length === 1) {
+          const onlyRow = tbody.children[0]
+          if (onlyRow && onlyRow.textContent && onlyRow.textContent.includes("No files found")) {
+            tbody.innerHTML = ""
+          }
+        }
+
+        const tr = document.createElement("tr")
+
+        const tdName = document.createElement("td")
+        tdName.textContent = filename
+
+        const tdEdit = document.createElement("td")
+
+        const aEdit = document.createElement("a")
+        aEdit.href = "#"
+        aEdit.textContent = "edit"
+        tdEdit.appendChild(aEdit)
+
+        const aDelete = document.createElement("a")
+        aDelete.href = "#"
+        aDelete.textContent = "delete"
+        tdEdit.appendChild(document.createTextNode(" "))
+        tdEdit.appendChild(aDelete)
+
+        aEdit.addEventListener("click", (e) => {
+          e.preventDefault()
+          enterEditMode({
+            tr,
+            tdName,
+            tdEdit,
+            folderName,
+            currentFile: filename,
+          })
+        })
+
+        aDelete.addEventListener("click", async (e) => {
+          e.preventDefault()
+          await maybeDeleteRow({ tr, folderName, filename })
+        })
+
+        tr.appendChild(tdName)
+        tr.appendChild(tdEdit)
+        tbody.appendChild(tr)
+      }
+
       async function loadFolder() {
         const folderName = getQueryParam("name")
         const tbody = document.getElementById("file-list")
@@ -216,66 +291,64 @@
 
           const data = await res.json()
 
+          const canonicalFolderName = data.name || folderName
+
           if (data.uid) {
             title.textContent = data.description
               ? `${data.uid} – ${data.description}`
               : data.uid
           } else {
-            title.textContent = folderName
+            title.textContent = canonicalFolderName
           }
 
           const files = Array.isArray(data.files) ? data.files : []
 
           if (files.length === 0) {
             tbody.innerHTML = `<tr><td colspan="2">No files found.</td></tr>`
-            return
+          } else {
+            tbody.innerHTML = ""
+            for (const filename of files) {
+              addFileRow({ tbody, folderName: canonicalFolderName, filename })
+            }
           }
 
-          tbody.innerHTML = ""
+          // Wire upload form now that we know canonical folder name
+          const form = document.getElementById("upload-form")
+          const fileInput = document.getElementById("upload-file")
+          const btn = document.getElementById("upload-btn")
+          const status = document.getElementById("upload-status")
 
-          for (const filename of files) {
-            const tr = document.createElement("tr")
+          form.addEventListener("submit", async (e) => {
+            e.preventDefault()
 
-            const tdName = document.createElement("td")
-            tdName.textContent = filename
+            const file = fileInput.files && fileInput.files[0]
+            if (!file) return
 
-            const tdEdit = document.createElement("td")
+            // basic client-side check
+            if (!file.name.toLowerCase().endsWith(".mp3")) {
+              alert("Please select an .mp3 file")
+              return
+            }
 
-            const aEdit = document.createElement("a")
-            aEdit.href = "#"
-            aEdit.textContent = "edit"
-            tdEdit.appendChild(aEdit)
+            btn.disabled = true
+            status.textContent = "uploading..."
 
-            const aDelete = document.createElement("a")
-            aDelete.href = "#"
-            aDelete.textContent = "delete"
-            tdEdit.appendChild(document.createTextNode(" "))
-            tdEdit.appendChild(aDelete)
+            try {
+              const result = await postUploadMp3(canonicalFolderName, file)
+              status.textContent = "done"
+              fileInput.value = ""
 
-            aEdit.addEventListener("click", (e) => {
-              e.preventDefault()
-              enterEditMode({
-                tr,
-                tdName,
-                tdEdit,
-                folderName: data.name || folderName,
-                currentFile: filename,
-              })
-            })
-
-            aDelete.addEventListener("click", async (e) => {
-              e.preventDefault()
-              await maybeDeleteRow({
-                tr,
-                folderName: data.name || folderName,
-                filename,
-              })
-            })
-
-            tr.appendChild(tdName)
-            tr.appendChild(tdEdit)
-            tbody.appendChild(tr)
-          }
+              // Add the row immediately
+              addFileRow({ tbody, folderName: canonicalFolderName, filename: result.name || file.name })
+            } catch (err) {
+              console.error(err)
+              status.textContent = "failed"
+              alert(`Upload failed: ${err.message}`)
+            } finally {
+              btn.disabled = false
+              setTimeout(() => { status.textContent = "" }, 1200)
+            }
+          })
         } catch (err) {
           console.error(err)
           tbody.innerHTML = `<tr><td colspan="2">Failed to load folder.</td></tr>`
