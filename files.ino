@@ -58,6 +58,36 @@ String findFolderForUid(const String &uidHex) {
   return "";
 }
 
+static int collectMp3Files(const String &folderPath, String *outFiles, int maxFiles) {
+  File dir = SD.open(folderPath.c_str());
+  if (!dir || !dir.isDirectory()) {
+    if (dir) dir.close();
+    return 0;
+  }
+
+  int n = 0;
+  File entry = dir.openNextFile();
+  while (entry) {
+    if (!entry.isDirectory()) {
+      String name = basenameOf(entry.name());
+      if (endsWithMp3(name)) {
+        if (n < maxFiles) {
+          outFiles[n++] = name;
+        } else {
+          // too many files; ignore extras
+          entry.close();
+          break;
+        }
+      }
+    }
+    entry.close();
+    entry = dir.openNextFile();
+  }
+
+  dir.close();
+  return n;
+}
+
 void filesSetup() {
   pinMode(PIN_SD_CS, OUTPUT);
   digitalWrite(PIN_SD_CS, HIGH);

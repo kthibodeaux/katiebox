@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="/simple-v1.min.css">
+    <title>Katiebox – Folder</title>
+  </head>
+  <body>
+    <h1><a href="/">Katiebox</a></h1>
+    <h2 id="folder-title">...</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>File</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="file-list">
+        <tr><td colspan="2">Loading...</td></tr>
+      </tbody>
+    </table>
+
+    <script>
+      function getQueryParam(name) {
+        const params = new URLSearchParams(window.location.search)
+        return params.get(name)
+      }
+
+      async function loadFolder() {
+        const folderName = getQueryParam("name")
+        const tbody = document.getElementById("file-list")
+        const title = document.getElementById("folder-title")
+
+        if (!folderName) {
+          tbody.innerHTML = `<tr><td colspan="2">Missing folder name.</td></tr>`
+          return
+        }
+
+        try {
+          const res = await fetch(
+            `/api/folder.json?name=${encodeURIComponent(folderName)}`,
+            { cache: "no-store" }
+          )
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+          const data = await res.json()
+
+          if (data.uid) {
+            title.textContent = data.description
+              ? `${data.uid} – ${data.description}`
+              : data.uid
+          }
+
+          const files = Array.isArray(data.files) ? data.files : []
+
+          if (files.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="2">No files found.</td></tr>`
+            return
+          }
+
+          tbody.innerHTML = ""
+
+          for (const filename of files) {
+            const tr = document.createElement("tr")
+
+            const tdName = document.createElement("td")
+            tdName.textContent = filename
+
+            const tdEdit = document.createElement("td")
+            const aEdit = document.createElement("a")
+            aEdit.href = "#"
+            aEdit.textContent = "edit"
+            tdEdit.appendChild(aEdit)
+
+            tr.appendChild(tdName)
+            tr.appendChild(tdEdit)
+            tbody.appendChild(tr)
+          }
+        } catch (err) {
+          console.error(err)
+          tbody.innerHTML = `<tr><td colspan="2">Failed to load folder.</td></tr>`
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", loadFolder)
+    </script>
+  </body>
+</html>

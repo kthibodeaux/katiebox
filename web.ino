@@ -10,6 +10,7 @@ extern String AUDIO_ROOT;
 
 static WebServer server(80);
 static bool webEnabled = false;
+static constexpr int MAX_FILES = 128;
 
 static String contentTypeForPath(const String &path) {
   if (path.endsWith(".html")) return "text/html; charset=utf-8";
@@ -48,6 +49,17 @@ static void splitFolderName(const String &folderName, String &uidOut, String &de
 
   uidOut = folderName.substring(0, dash);
   descOut = folderName.substring(dash + 1);
+}
+
+static void appendStringArrayJson(String &out, String *arr, int count) {
+  out += "[";
+  for (int i = 0; i < count; i++) {
+    if (i > 0) out += ",";
+    out += "\"";
+    out += jsonEscape(arr[i]);
+    out += "\"";
+  }
+  out += "]";
 }
 
 static bool serveFileFromWww(String uri) {
@@ -174,6 +186,134 @@ static void handleIndexJson() {
   server.send(200, "application/json; charset=utf-8", body);
 }
 
+static void appendMp3FilesJsonArray(String &out, const String &folderPath) {
+  File dir = SD.open(folderPath.c_str());
+  if (!dir || !dir.isDirectory()) {
+    if (dir) dir.close();
+    out += "[]";
+    return;
+  }
+
+  out += "[";
+
+  bool first = true;
+  File entry = dir.openNextFile();
+  while (entry) {
+    if (!entry.isDirectory()) {
+      String name = basenameOf(entry.name());
+
+      if (endsWithMp3(name)) {
+        if (!first) out += ",";
+        first = false;
+        out += "\"";
+        out += jsonEscape(name);
+        out += "\"";
+      }
+    }
+
+    entry.close();
+    entry = dir.openNextFile();
+  }
+
+  out += "]";
+  dir.close();
+}
+
+static void handleFolderJson() {
+  if (!server.hasArg("name")) {
+    server.send(400, "application/json; charset=utf-8", "{\"error\":\"missing name param\"}");
+    return;
+  }
+
+  String name = server.arg("name");
+  name.trim();
+
+  if (name.length() == 0) {
+    server.send(400, "application/json; charset=utf-8", "{\"error\":\"empty name param\"}");
+    return;
+  }
+
+  // Basic safety: don't allow slashes or traversal
+  if (name.indexOf('/') >= 0 || name.indexOf("..") >= 0) {
+    server.send(400, "application/json; charset=utf-8", "{\"error\":\"invalid name param\"}");
+    return;
+  }
+
+  // If passed just a UID, find first folder starting with UID-
+  const bool looksLikeUidOnly = (name.indexOf('-') < 0);
+  const String prefix = looksLikeUidOnly ? (name + "-") : name;
+
+  File root = SD.open(AUDIO_ROOT.c_str());
+  if (!root) {
+    server.send(500, "application/json; charset=utf-8", "{\"error\":\"failed to open audio root\"}");
+    return;
+  }
+  if (!root.isDirectory()) {
+    root.close();
+    server.send(500, "application/json; charset=utf-8", "{\"error\":\"audio root not a directory\"}");
+    return;
+  }
+
+  String foundFolderName = "";
+
+  File entry = root.openNextFile();
+  while (entry) {
+    if (entry.isDirectory()) {
+      String folderName = basenameOf(entry.name());
+
+      if (looksLikeUidOnly) {
+        if (folderName.startsWith(prefix)) {
+          foundFolderName = folderName;
+          entry.close();
+          break;
+        }
+      } else {
+        if (folderName == prefix) {
+          foundFolderName = folderName;
+          entry.close();
+          break;
+        }
+      }
+    }
+
+    entry.close();
+    entry = root.openNextFile();
+  }
+
+  root.close();
+
+  if (foundFolderName.length() == 0) {
+    server.send(404, "application/json; charset=utf-8", "{\"error\":\"folder not found\"}");
+    return;
+  }
+
+  String uid, desc;
+  splitFolderName(foundFolderName, uid, desc);
+
+  bool isLast = (lastScannedUid.length() > 0 && uid == lastScannedUid);
+
+  String folderPath = AUDIO_ROOT;
+  if (!folderPath.endsWith("/")) folderPath += "/";
+  folderPath += foundFolderName;
+
+  String body;
+  body.reserve(2048);
+  body += "{";
+  body += "\"name\":\"" + jsonEscape(foundFolderName) + "\",";
+  body += "\"uid\":\"" + jsonEscape(uid) + "\",";
+  body += "\"description\":\"" + jsonEscape(desc) + "\",";
+  String files[MAX_FILES];
+  int fileCount = collectMp3Files(folderPath, files, MAX_FILES);
+  sortStrings(files, fileCount);
+
+  body += "\"files\":";
+  appendStringArrayJson(body, files, fileCount);
+  body += "}";
+
+  server.send(200, "application/json; charset=utf-8", body);
+}
+
+
 void webSetup() {
   webEnabled = false;
 }
@@ -186,6 +326,7 @@ void webEnable() {
   if (!connectWifi()) return;
 
   server.on("/api/index.json",  HTTP_GET, handleIndexJson);
+  server.on("/api/folder.json", HTTP_GET, handleFolderJson);
 
   // Static file fallback (index.html, style.css, folder.html, etc)
   server.onNotFound(handleNotFound);

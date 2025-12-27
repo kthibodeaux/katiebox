@@ -50,15 +50,7 @@ void clearPlaylist() {
 }
 
 void sortPlaylist() {
-  for (int i = 0; i < playlistCount - 1; i++) {
-    for (int j = 0; j < playlistCount - i - 1; j++) {
-      if (playlist[j] > playlist[j + 1]) {
-        String tmp = playlist[j];
-        playlist[j] = playlist[j + 1];
-        playlist[j + 1] = tmp;
-      }
-    }
-  }
+  sortStrings(playlist, playlistCount);
 }
 
 bool buildPlaylistForFolder(const String &folderPath) {
