@@ -8,7 +8,7 @@ Audio audio;
 bool isPlaying = false;
 int volumeLevel = 10;
 
-constexpr int MAX_TRACKS = 32;
+constexpr int MAX_TRACKS = 64;
 String playlist[MAX_TRACKS];
 int playlistCount = 0;
 int playlistIndex = 0;

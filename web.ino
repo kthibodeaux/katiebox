@@ -10,7 +10,7 @@ extern String AUDIO_ROOT;
 
 static WebServer server(80);
 static bool webEnabled = false;
-static constexpr int MAX_FILES = 128;
+static constexpr int MAX_FILES = 64;
 
 static File g_uploadFile;
 static String g_uploadFolder;
