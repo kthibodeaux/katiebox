@@ -14,8 +14,12 @@ void setup() {
 }
 
 void loop() {
-  webLoop();
-  buttonLoop();
-  audioLoop();
+  if (webIsEnabled) {
+    webLoop();
+  } else {
+    buttonLoop();
+    audioLoop();
+  }
+
   rfidLoop();
 }

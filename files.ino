@@ -122,7 +122,7 @@ void filesSetup() {
   pinMode(PIN_SD_CS, OUTPUT);
   digitalWrite(PIN_SD_CS, HIGH);
 
-  if (!SD.begin(PIN_SD_CS, SPI)) {
+  if (!SD.begin(PIN_SD_CS, SPI, 10000000)) {
     Serial.println("SD mount failed");
     while (true) delay(1000);
   }

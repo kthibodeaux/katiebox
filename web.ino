@@ -547,23 +547,27 @@ static void handleUploadMp3Upload() {
       return;
     }
 
+    // Normalize filename
     String fname = upload.filename;
     int slash = fname.lastIndexOf('/');
     if (slash >= 0) fname = fname.substring(slash + 1);
     slash = fname.lastIndexOf('\\');
     if (slash >= 0) fname = fname.substring(slash + 1);
-
     fname.trim();
 
     if (!isSafeSegment(fname)) {
       g_uploadError = "invalid filename";
       return;
     }
-    if (!endsWithMp3(fname)) {
+
+    String lower = fname;
+    lower.toLowerCase();
+    if (!lower.endsWith(".mp3")) {
       g_uploadError = "file must end with .mp3";
       return;
     }
 
+    // Ensure folder exists
     String folderPath = AUDIO_ROOT;
     if (!folderPath.endsWith("/")) folderPath += "/";
     folderPath += g_uploadFolder;
@@ -575,6 +579,7 @@ static void handleUploadMp3Upload() {
 
     String fullPath = joinPath3(AUDIO_ROOT, g_uploadFolder, fname);
 
+    // Refuse overwrite
     if (SD.exists(fullPath.c_str())) {
       g_uploadError = "file already exists";
       return;
@@ -597,19 +602,53 @@ static void handleUploadMp3Upload() {
       return;
     }
 
-    size_t written = g_uploadFile.write(upload.buf, upload.currentSize);
-    g_uploadBytes += written;
+    const uint8_t *buf = upload.buf;
+    size_t remaining = upload.currentSize;
+    size_t offset = 0;
 
-    if (written != upload.currentSize) {
+    while (remaining > 0) {
+      size_t written = g_uploadFile.write(buf + offset, remaining);
+
+      if (written == 0) {
+        // SD can return 0 temporarily when busy. Retry a few times.
+        bool recovered = false;
+        for (int tries = 0; tries < 20; tries++) {
+          delay(1);
+          yield();
+          written = g_uploadFile.write(buf + offset, remaining);
+          if (written > 0) { recovered = true; break; }
+        }
+        if (!recovered) {
+          g_uploadError = "short write (0 bytes written)";
+          break;
+        }
+      }
+
+      offset += written;
+      remaining -= written;
+
+      // Occasionally flush to reduce buffering pressure
+      if ((g_uploadBytes + offset) % (32 * 1024) < written) {
+        g_uploadFile.flush();
+      }
+
+      yield();
+    }
+
+    g_uploadBytes += offset;
+
+    if (offset != upload.currentSize && g_uploadError.length() == 0) {
       g_uploadError = "short write";
-      return;
     }
 
     return;
   }
 
   if (upload.status == UPLOAD_FILE_END) {
-    if (g_uploadFile) g_uploadFile.close();
+    if (g_uploadFile) {
+      g_uploadFile.flush();
+      g_uploadFile.close();
+    }
     return;
   }
 
@@ -622,6 +661,10 @@ static void handleUploadMp3Upload() {
 
 static void handleUploadMp3Done() {
   if (g_uploadError.length() > 0) {
+    if (g_uploadFolder.length() && g_uploadName.length()) {
+      String path = joinPath3(AUDIO_ROOT, g_uploadFolder, g_uploadName);
+      if (SD.exists(path.c_str())) SD.remove(path.c_str());
+    }
     String body = "{\"error\":\"" + jsonEscape(g_uploadError) + "\"}";
     server.send(400, "application/json; charset=utf-8", body);
     return;
@@ -636,7 +679,6 @@ static void handleUploadMp3Done() {
   body += "\"bytes\":";
   body += String((unsigned long)g_uploadBytes);
   body += "}";
-
   server.send(200, "application/json; charset=utf-8", body);
 }
 
