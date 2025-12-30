@@ -14,6 +14,7 @@ int playlistCount = 0;
 int playlistIndex = 0;
 String currentFolder = "";
 bool trackEnded = false;
+int maxVolume = 18;
 
 void onAudioEvent(Audio::msg_t m);
 void onAudioEvent(Audio::msg_t m) {
@@ -23,7 +24,7 @@ void onAudioEvent(Audio::msg_t m) {
 }
 
 void increaseVolume() {
-  if (volumeLevel < 21) {
+  if (volumeLevel < maxVolume) {
     volumeLevel++;
     audio.setVolume(volumeLevel);
     Serial.print("Volume: ");
